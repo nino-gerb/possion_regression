@@ -5,26 +5,14 @@ date: "`r Sys.Date()`"
 output:
   pdf_document:
     latex_engine: xelatex
+    keep_tex: true
+    includes:
+      in_header: header.tex
   html_document:
     df_print: paged
 fontsize: 12pt
 geometry: margin=2.5cm
 ---
-
-# Introduction
-
-This report investigates factors influencing the number of apprentices migrating from various regions to Edinburgh. The response variable is the **count of apprentices**, and the predictors are **distance from Edinburgh**, **population of the region**, **degree of urbanization**, and **direction from Edinburgh**. The objective is to model the count using a **Poisson regression** and assess the strength and direction of association for each predictor.
-
-# Data Description
-
-The dataset used in this analysis was obtained from [http://users.stat.ufl.edu/~winner/data/apprentice.txt](http://users.stat.ufl.edu/~winner/data/apprentice.txt). It contains the following variables:
-
-- `region`: Region name
-- `apprentices`: Number of apprentices (response variable)
-- `distance`: Distance from Edinburgh (in miles)
-- `population`: Population of the region (in thousands)
-- `urban`: Urbanization score (numeric)
-- `direction`: Cardinal direction from Edinburgh (coded as a factor: 1=North, 2=West, 3=South)
 
 ```{r load-libraries, include=FALSE}
 library(tidyverse)
@@ -33,43 +21,109 @@ library(knitr)
 library(MASS)
 library(GGally)
 library(patchwork)
-
+library(dplyr)
+library(tidyr)
+library(pscl)
+library(broom)
+library(purrr)
 ```
 
-```{r test, include=FALSE}
-url <- "http://users.stat.ufl.edu/~winner/data/apprentice.dat"
-widths <- c(20, 3, -4, 4, -4, 4, -3, 5, -7, 1)
-col_names <- c("region", "distance", "apprentices", "population", "urban", "direction")
-data <- read.fwf(url, widths = widths, col.names = col_names, strip.white = TRUE)
-?data
+# Introduction
 
-```
+This report investigates factors influencing the number of apprentices migrating from various regions to Edinburgh. The response variable is the **count of apprentices**, and the predictors are **distance from Edinburgh**, **population of the region**, **degree of urbanization**, and **direction from Edinburgh**. The scientific question is: *Which geographical and demographic factors significantly predict the number of apprentices migrating to Edinburgh between 1775 and 1799, and how do these relationships vary across regions?*
 
 
-# Data Import and Preprocessing
+The dataset records the number of apprentices moving to Edinburgh between 1775 and 1799 from other Scottish counties. During this period, Edinburgh was a significant center for trade and education, attracting young individuals looking for apprenticeship opportunities. Understanding the patterns of apprentice migration during this time provides valuable insights into the socio-economic factors influencing labor mobility in the 18th-century in Scotland. (Lovett & Flowerdew, 1989).
 
-```{r import-data, message=FALSE}
+# Descriptive Statistics
+
+This section provides an overview of the key variables in the dataset. The dataset used in this analysis was obtained from [http://users.stat.ufl.edu/~winner/data/apprentice.txt](http://users.stat.ufl.edu/~winner/data/apprentice.txt). It contains the following variables:
+
+- `region`: Region name
+- `apprentices`: Number of apprentices (response variable)
+- `distance`: Distance from Edinburgh (in miles)
+- `population`: Population of the region (in thousands)
+- `urban`: Urbanization score (numeric)
+- `direction`: Cardinal direction from Edinburgh (coded as a factor: 1=North, 2=West, 3=South).
+
+**Numerical Variables:** Table 1 presents the minimum, median, mean, and maximum values for four continuous variables:
+
+```{r summary-table, message=FALSE, echo=FALSE}
 url <- "http://users.stat.ufl.edu/~winner/data/apprentice.dat"
 widths <- c(20, 3, -4, 4, -4, 4, -3, 5, -7, 1)
 col_names <- c("region", "distance", "apprentices", "population", "urban", "direction")
 data <- read.fwf(url, widths = widths, col.names = col_names, strip.white = TRUE)
 data$direction <- factor(data$direction, levels = c(1, 2, 3), labels = c("North", "West", "South"))
-summary(data)
-glimpse((data))
-summary_df <- summary(data) %>% 
-  as.data.frame()
 
-knitr::kable(summary_df, caption = "Summary Statistics of the Apprentice Dataset")
+# Manually create clean summary table
+summary_table <- tibble(
+  Variable = c("Distance", "Apprentices", "Population", "Urbanization"),
+  Min = c(min(data$distance), min(data$apprentices), min(data$population), min(data$urban)),
+  Median = c(median(data$distance), median(data$apprentices), median(data$population), median(data$urban)),
+  Mean = c(mean(data$distance), mean(data$apprentices), mean(data$population), mean(data$urban)),
+  Max = c(max(data$distance), max(data$apprentices), max(data$population), max(data$urban))
+)
+
+knitr::kable(summary_table, digits = 1, caption = "Clean Summary Statistics of the Main Variables")
+
 
 ```
-The dataset consists of 33 Scottish regions, each characterized by five variables. The distance from Edinburgh ranges from 21 to 491 miles, with a mean of 131.8 and a median of 92 miles, suggesting a right-skewed distribution. The population of the regions varies from 5,000 to 147,000, with a mean of 46,580 and a median of 30,000, indicating a few highly populated regions. The urbanization score spans 7.7 to 69.9, with an average of 28.6, and shows a spread across rural to semi-urban areas. The direction from Edinburgh is a categorical variable with 16 regions to the North, 8 to the West, and 9 to the South. The response variable, apprentices, has a minimum of 0 and a maximum of 225, with a mean of 14.2 and a median of 3, indicating a highly skewed distribution dominated by a few large values — especially one outlier (Midlothian) sending over 200 apprentices.
 
 
+The figures in table 1 show that while most counties contributed few apprentices (median = 3), some—such as Midlothian—had significantly higher counts, driving the mean up to 14.2. Similarly, distances vary widely, with some regions more than 400 miles from Edinburgh.
+
+**Categorical Variable, Direction: ** The dataset also categorizes each county into one of three cardinal directions relative to Edinburgh: North, West, and South. The majority of counties are located in the North (49%), followed by the South (27%) and West (24%). There are 33 different counties in the data set and therefore 33 records. 
+
+```{r categorical-summary, echo=FALSE}
+# Frequency table for the categorical variable 'direction'
+#direction_table <- data %>%
+#  count(direction, name = "Count") %>%
+#  mutate(Percent = round(100 * Count / sum(Count), 1))
+
+# Display the table
+#knitr::kable(direction_table, caption = "Distribution of Direction Categories (North, West, South)")
+
+```
+### Counties with the Most and Fewest Apprentices
+To better understand spatial disparities in apprentice migration, table 2 highlights the counties with the highest number of apprentices
+
+```{r top-counties, echo=FALSE}
+
+top_apprentices <- data %>%
+  dplyr::arrange(desc(apprentices), region) %>%
+  dplyr::select(region, apprentices, distance, population, urban, direction) %>%
+  dplyr::slice(1:5)
+
+knitr::kable(top_apprentices, caption = "Top 5 Counties with the Most Apprentices")
+```
+These top counties are either located close to Edinburgh (e.g., Midlothian, East Lothian) or have high population and urbanization scores, suggesting accessibility and economic opportunity may have facilitated apprentice movement
+
+```{r bottom-counties, echo=FALSE}
+
+#top_apprentices <- data %>%
+#  dplyr::arrange((apprentices), region) %>%
+#  dplyr::select(region, apprentices, distance, population, urban, direction) %>%
+#  dplyr::slice(1:7)
+
+#knitr::kable(top_apprentices, caption = "5 Counties with the Least Apprentices")
+```
+
+By investigating the dataset, we observe that 7 out of 33 Scottish counties report zero apprentices. This is likely to impact the modeling later on and should be taken into account. These counties tend to have low population sizes (ranging from 8 to 29 thousand) and high distances from Edinburgh (between 79 and 366 miles). Their urbanization scores vary from 9 to 43.6. This suggests that accessibility—captured by distance—as well as population size and urbanization, may influence apprentice migration. Notably, the counties with zero apprentices are evenly distributed across the North, South, and West.
+
+
+```{r comment, echo=FALSE}
+## Summary of dataset description 
+#The dataset consists of 33 Scottish regions, each characterized by five variables. The distance from Edinburgh ranges from 21 to 491 miles, with a mean of 131.8 and a #median of 92 miles, suggesting a right-skewed distribution. The population of the regions varies from 5,000 to 147,000, with a mean of 46,580 and a median of 30,000, #indicating a few highly populated regions. The urbanization score spans 7.7 to 69.9, with an average of 28.6, and shows a spread across rural to semi-urban areas. The #direction from Edinburgh is a categorical variable with 16 regions to the North, 8 to the West, and 9 to the South. The response variable, apprentices, has a minimum of 0 #and a maximum of 225, with a mean of 14.2 and a median of 3, indicating a highly skewed distribution dominated by a few large values — especially one outlier (Midlothian)  #sending over 200 apprentices
+```
 # Exploratory Data Analysis
+This section provides an overview of the data using correlation analysis, histograms, and scatterplots to guide model specification.
 
-## Univariate Analysis
+## Correlation Matrix and Distribution Overview
 
-```{r univariate}
+To understand both the individual variables and their pairwise relationships, we use a correlation matrix with embedded histograms and scatterplots. This helps guide model choice and transformations.
+
+
+```{r univariate, echo=FALSE}
 p1 <- ggplot(data, aes(x = apprentices)) +
   geom_histogram(binwidth = 10, fill = "lightblue", color = "black") +
   labs(title = "Distribution of Apprentices", x = "Number of Apprentices")
@@ -86,262 +140,624 @@ p4 <- ggplot(data, aes(x = urban)) +
   geom_histogram(binwidth = 5, fill = "lightgoldenrod", color = "black") +
   labs(title = "Distribution of Urbanization Score", x = "Urbanization")
 
-(p1 | p2) /
-(p3 | p4)
+#(p1 | p2) /
+#(p3 | p4)
 ```
-## Univariate Distributions
 
-To understand the structure of our dataset before modeling, we examined the distribution of each variable using histograms. These provide insight into the shape, spread, and potential issues in the data.
+```{r bivariate, fig.cap="Correlation Matrix and Distribution Plots", fig.width=6, fig.height=4, echo=FALSE}
+ggpairs(data[, c("apprentices", "distance", "population", "urban")]) 
+#  ggtitle("Correlation Matrix and Distribution Plots") +
+#  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+```
 
-- **Apprentices (Response Variable):**  
-  The distribution is highly right-skewed, with most counties sending very few apprentices. A single outlier (likely Midlothian) sent over 200 apprentices. This justifies the use of a Poisson regression model, which is designed for skewed count data.
+**Apprentices (Response Variable): ** Apprenticeship counts are heavily right-skewed, with most regions sending few apprentices and one clear outlier (Midlothian).
 
-- **Distance (Predictor):**  
-  Many counties are located within 50–150 miles of Edinburgh, with fewer in the extreme distances (200–500 miles). This shows that the data is concentrated in a realistic and informative range for modeling accessibility effects.
+**Distance (Predictor):** Shows a moderate negative correlation with apprentices (r = –0.30), making it a key predictor. Distances range from 21 to 491 miles, with most counties located within 50–150 miles of Edinburgh.
 
-- **Population (Predictor):**  
-  The population distribution is also right-skewed, with most counties having fewer than 50,000 people. This informs us that a few highly populated counties may dominate the influence on apprentice numbers. Since the Poisson model uses a log link, it can handle this skew naturally, but we must remain cautious of leverage effects.
+**Population (Predictor):** The distribution is right-skewed, with most counties having fewer than 50,000 residents. It shows a weak positive association with apprentice counts (r = 0.14), suggesting some influence.
 
-- **Urbanization (Predictor):**  
-  Urbanization scores show a somewhat bimodal distribution, with groups of counties either mostly rural or moderately urban. This suggests urbanization might not have a simple linear relationship with apprentice migration and may interact with other factors such as geographic direction.
+**Urbanization (Predictor):**  Also right-skewed, with no meaningful linear correlation with apprentices (r = –0.02). However, non-linear or regional effects may be present.
 
-These histograms are crucial for identifying skewed distributions, potential outliers, and understanding where most of the data lies. This informs both our choice of model and interpretation of its output.
+**Distance and Urbanization:** Strongly negatively correlated (r = –0.51), suggesting potential multicollinearity if both variables are included in the model
+
+The histograms help identify skewed distributions, potential outliers (e.g., Midlothian), and the overall data spread—informing model choice and interpretation. The matrix confirms distance as the most informative predictor and highlights overlap with urbanization, warranting caution in joint interpretation. 
+
+## Bivariate Analysis
+To examine the influence of direction and the effect of log-transformations on the predictors, we present the following scatterplots.
+
+```{r univariate2,fig.cap="Apprentices by Region and Demographic Factors", fig.width=6, fig.height=4, echo=FALSE, message=FALSE, warning=FALSE}
 
 
-```{r univariate2}
+library(ggplot2)
+library(patchwork)
+
 pl1 <- ggplot(data, aes(y = apprentices, x = distance, color = direction)) +
   geom_point(alpha = 1) +
+  geom_smooth(color = "red", linetype = "dotted", size = 0.5, se = TRUE) +
   theme_minimal()
 
 pl2 <- ggplot(data, aes(y = apprentices, x = urban, color = direction)) +
   geom_point(alpha = 1) +
+  geom_smooth(color = "red", linetype = "dotted", size = 0.5, se = TRUE) +
   theme_minimal()
 
 pl3 <- ggplot(data, aes(y = apprentices, x = population, color = direction)) +
   geom_point(alpha = 1) +
+  geom_smooth(color = "red", linetype = "dotted", size = 0.5, se = TRUE) +
   theme_minimal()
 
-pl4 <- ggplot(data, aes(y = apprentices, x = population, color = direction)) +
-  geom_point(alpha = 1) +
+plog1 <- ggplot(data, aes(x = log(distance), y = apprentices, color = direction)) +
+  geom_point() +
+  geom_smooth(color = "red", linetype = "dotted", size = 0.5, se = TRUE) +
   theme_minimal()
 
-(pl1 | pl2) /
-(pl3 | pl4)
+plog2 <- ggplot(data, aes(x = log(urban), y = apprentices, color = direction)) +
+  geom_point() +
+  geom_smooth(color = "red", linetype = "dotted", size = 0.5, se = TRUE) +
+  theme_minimal()
+
+plog3 <- ggplot(data, aes(x = log(population), y = apprentices, color = direction)) +
+  geom_point() +
+  geom_smooth(color = "red", linetype = "dotted", size = 0.5, se = TRUE) +
+  theme_minimal()
+
+
+# Combine with one legend
+final_plot <- ((pl1 | pl2 | pl3) / (plog1 | plog2 | plog3)) +
+  plot_layout(guides = "collect") +
+  plot_annotation(
+    #title = "Apprentices by Region and Demographic Factors",
+    #theme = theme(
+      #plot.title = element_text(hjust = 0.5, size = 16, face = "bold")
+   # )
+  ) &
+  theme(legend.position = "bottom")
+
+# Print final plot
+final_plot
 ```
-## Bivariate Relationships by Region
 
-The following scatterplots show the relationships between the number of apprentices and each predictor (distance, urbanization, and population), with points colored by region (`direction`: North, South, West).
+The lower row of scatterplots presents the same relationships using log-transformed predictors, which help linearize skewed distributions and stabilize variance. The effect of distance becomes more regular, reinforcing its role as a strong negative predictor. Urbanization still shows no consistent pattern, though subtle regional differences persist. For population, the log transformation slightly clarifies the weak positive trend, but regional variability remains high.
 
-- **Distance vs Apprentices:**  
-  There is a clear negative relationship: counties farther from Edinburgh tend to send fewer apprentices. This is especially visible among Northern counties (red), which are spread across larger distances and mostly have low apprentice counts. In contrast, many Southern counties (blue) are closer and show higher apprentice numbers, indicating that `direction` modifies the effect of distance. This supports the inclusion of both `distance` and `direction` in the model and suggests a possible interaction.
+These refined plots illustrate the utility of log transformations in preparing variables for modeling, and further support the inclusion of interaction terms between direction and distance or population.
 
-- **Urbanization vs Apprentices:**  
-  No strong linear trend is visible across regions. Apprentice counts remain low or modest regardless of the degree of urbanization. One major outlier from the South stands out with high apprentice numbers and low urbanization. This suggests urbanization may not be a strong independent predictor and could be confounded or interacting with other variables such as population or direction.
-
-- **Population vs Apprentices:**  
-  A weak positive association is observed: counties with larger populations tend to send slightly more apprentices. However, the relationship is not consistent across regions, and large variability is present. The same Southern outlier dominates the upper end of apprentice counts. This supports including `population` in the model but cautions us to monitor its influence.
-
-These plots highlight how `direction` affects relationships between predictors and the response. In particular, Southern counties are visibly different in their behavior, supporting the inclusion of `direction` as a categorical variable and motivating interaction terms in the Poisson model.
-
-
-
-
-## Bivariate Analysis
-
-```{r bivariate}
-ggpairs(data[, c("apprentices", "distance", "population", "urban")])
-```
-## Correlation Matrix and Bivariate Density Plots
-
-The correlation matrix below provides a compact overview of the linear relationships between all numerical variables in the dataset. It includes:
-
-- **Histograms/density plots on the diagonal** (univariate distributions),
-- **Scatterplots with smoothing curves** in the lower triangle (bivariate relationships),
-- **Pearson correlation coefficients** in the upper triangle.
-
-### Key Observations:
-
-- **Apprentices vs Distance**:  
-  The correlation is –0.300, indicating a moderate negative relationship. The scatterplot confirms that counties farther from Edinburgh tend to send fewer apprentices, justifying the inclusion of `distance` as a strong predictor.
-
-- **Apprentices vs Population**:  
-  The correlation is 0.143, suggesting a weak positive association. While more populous counties may tend to send more apprentices, the relationship is not strong and shows substantial variation.
-
-- **Apprentices vs Urbanization**:  
-  The correlation is near zero (–0.021), indicating no meaningful linear association. However, some nonlinearity might exist or effects could vary by region, which may explain why `urban` was still significant in the Poisson model.
-
-- **Distance vs Urbanization**:  
-  A strong negative correlation (–0.511**) is observed, implying that counties closer to Edinburgh tend to be more urbanized. This introduces potential multicollinearity when both variables are included in a model and should be taken into account when interpreting coefficients.
-
-- **Other correlations** (e.g., distance vs population, population vs urban) are relatively weak, suggesting that predictors are not strongly collinear beyond the noted pair.
-
-### Conclusion:
-
-This matrix is valuable for identifying which variables are likely to be informative in the model and which ones may overlap. It confirms `distance` as a key predictor and flags the strong inverse relationship between `distance` and `urbanization`, guiding caution in model interpretation.
 
 # Poisson Regression Model
 
-## Model Definition
+## Model Definitions
 
-Let \( Y_i \) be the number of apprentices from region \( i \). We assume:
+Let \( Y_i \) be the number of apprentices in region \( i \), assumed to follow a Poisson distribution:
 
 \[
-Y_i \sim \text{Poisson}(\lambda_i), \quad \log(\lambda_i) = \beta_0 + \beta_1 \cdot \text{Distance}_i + \beta_2 \cdot \text{Population}_i + \beta_3 \cdot \text{Urban}_i + \beta_4 \cdot \text{Direction}_i
+Y_i \sim \text{Poisson}(\lambda_i), \quad \log(\lambda_i) = \eta_i
 \]
 
-Model fitting is performed using **maximum likelihood estimation** via `glm()` with `family = poisson(link = "log")`.
+Model fitting is performed via **maximum likelihood estimation**
+
+We build several models to compare the influence of the predictors in the dataset. The linear predictors \( \eta_i \) for the six Poisson models are defined as:
+
+\begin{align*}
+\textbf{Model 0:} \quad 
+\eta_i &= \beta_0 + \beta_1 \cdot d_i + \beta_2 \cdot p_i + \beta_3 \cdot \text{Dir}_i \\
+\\
+\textbf{Model 1:} \quad 
+\eta_i &= \beta_0 + \beta_1 \cdot d_i + \beta_2 \cdot p_i + \beta_3 \cdot \text{Dir}_i + \beta_4 \cdot (p_i \times \text{Dir}_i) \\
+\\
+\textbf{Model 2:} \quad 
+\eta_i &= \beta_0 + \beta_1 \cdot d_i + \beta_2 \cdot \text{Dir}_i + \beta_3 \cdot (d_i \times \text{Dir}_i) + \beta_4 \cdot p_i \\
+\\
+\textbf{Model 3:} \quad 
+\eta_i &= \beta_0 + \beta_1 \cdot \log(d_i) + \beta_2 \cdot \text{Dir}_i + \beta_3 \cdot (\log(d_i) \times \text{Dir}_i) \\
+       &\quad + \beta_4 \cdot \log(p_i) + \beta_5 \cdot u_i \\
+\\
+\textbf{Model 4:} \quad 
+\eta_i &= \beta_0 + \beta_1 \cdot \log(d_i) + \beta_2 \cdot \text{Dir}_i + \beta_3 \cdot (\log(d_i) \times \text{Dir}_i) + \beta_4 \cdot \log(p_i) \\
+\\
+\textbf{Model 5:} \quad 
+\eta_i &= \beta_0 + \beta_1 \cdot \log(d_i) + \beta_2 \cdot \log(p_i)
+\end{align*}
+
+\[
+\textbf{Zero-Inflated Poisson Model:} \quad 
+Y_i \sim \begin{cases}
+0 & \text{with probability } \pi_i                                       \\
+\text{Poisson}(\eta_i) & \text{with probability } 1 - \pi_i         
+\end{cases}
+\quad
+\]
+
+\[
+\text{with }\eta_i = \beta_0 + \beta_1 \cdot d_i + \beta_2 \cdot \text{Dir}_i + \beta_3 \cdot (d_i \times \text{Dir}_i) + \beta_4 \cdot p_i
+\]
+
+ \[ \text{and a constant zero-inflation term modeled by a logistic function: logit}(\pi_i) =\gamma_0\]
+
+
+
+**Abbreviation Key:**  
+`Int` = Intercept, `d` = distance, `p` = population, `dW` = directionWest, `dS` = directionSouth, `p:dW` = population × directionWest, `p:dS` = population × directionSouth, `d:dW` = distance × directionWest, `d:dS` = distance × directionSouth, `log(d)` = log(distance), `log(p)` = log(population), `log(d):dW` = log(distance) × directionWest,`log(d):dS` = log(distance) × directionSouth.
+
+Each model adds complexity in a controlled way to assess trade-offs between interpretability and fit quality (via AIC/log-likelihood). The goal is to identify the most parsimonious model that captures relevant spatial and demographic effects.
+
+- Model 0–2 include linear predictors and interaction terms to capture spatial heterogeneity.
+- Model 3–5 introduce logarithmic transformations to reduce skewness and potentially improve fit.
+- The **ZIP model** is used to account for **excess zeros**, which may arise in rural or low-population regions with no apprentices at all.
+
+
 
 ## Model Fitting
 
-```{r fit-model}
+```{r fit-model, echo=FALSE}
+# Load package
+
 model0 <- glm(apprentices ~ distance + population + direction, data = data, family = poisson(link = "log"))
 model1 <- glm(apprentices ~ distance + population*direction , data = data, family = poisson(link = "log"))
 model2 <- glm(apprentices ~ distance * direction + population , data = data, family = poisson(link = "log"))
-summary(model0)
-summary(model1)
-summary(model2)
+model3 <- glm(apprentices ~ log(distance) * direction + log(population) + urban , data = data, family = poisson(link = "log"))
+model4 <- glm(apprentices ~ log(distance) * direction + log(population) , data = data, family = poisson(link = "log"))
+model5 <- glm(apprentices ~ log(distance)  + log(population) , data = data, family = poisson(link = "log"))
+
+# ZIP model with same fixed effects for count model
+zip_model <- zeroinfl(apprentices ~  log(distance) * direction + log(population) + urban | 1, 
+                      data = data)
+
+
+#summary(model0)
+#summary(model1)
+#summary(model2)
+#summary(model3)
+#summary(model4)
+#summary(model5)
+#summary(zip_model)
 ```
+```{r model-summary-table, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+# GLM models and names
+glm_models <- list(model0, model1, model2, model3, model4, model5)
+glm_names <- paste0("Model ", 0:5)
+zip_name <- "ZIP Model"
+
+# Get AIC/logLik for GLMs
+glm_info <- map2_dfr(glm_models, glm_names, function(model, name) {
+  g <- glance(model)
+  tibble(
+    Model = name,
+    AIC = round(g$AIC, 2),
+    LogLik = round(g$logLik, 2),
+    df = g$df.residual
+  )
+})
+
+# Add ZIP model info
+zip_info <- tibble(
+  Model = zip_name,
+  AIC = round(AIC(zip_model), 2),
+  LogLik = round(as.numeric(logLik(zip_model)), 2),
+  df = NA
+)
+
+aic_table <- bind_rows(glm_info, zip_info)
+
+# Coefficients for GLMs
+coef_table_glm <- map2_dfr(glm_models, glm_names, function(model, name) {
+  tidy(model) %>%
+    mutate(Model = name) %>%
+    dplyr::select(Model, term, estimate)
+})
+
+# Coefficients for ZIP (count part only)
+zip_coef <- as.data.frame(coef(summary(zip_model))$count)
+zip_coef$term <- rownames(zip_coef)
+zip_coef$Model <- zip_name
+zip_coef <- zip_coef %>%
+  dplyr::select(Model, term, estimate = Estimate)
+
+# Combine all coefficients
+coef_table <- bind_rows(coef_table_glm, zip_coef) %>%
+  pivot_wider(names_from = term, values_from = estimate)
+
+# Merge
+summary_table <- left_join(aic_table, coef_table, by = "Model")
+
+# Print
+library(kableExtra)
+
+names(summary_table) <- dplyr::recode(names(summary_table),
+  `(Intercept)` = "Int",
+  `distance` = "d",
+  `population` = "p",
+  `directionWest` = "dW",
+  `directionSouth` = "dS",
+  `population:directionWest` = "p:dW",
+  `population:directionSouth` = "p:dS",
+  `distance:directionWest` = "d:dW",
+  `distance:directionSouth` = "d:dS",
+  `log(distance)` = "log(d)",
+  `log(population)` = "log(p)",
+  `log(distance):directionWest` = "log(d):dW",
+  `log(distance):directionSouth` = "log(d):dS"
+)
+
+
+
+#kable(summary_table, caption = "Model Coefficients and AIC Summary", digits = 3, format = "latex", booktabs = TRUE) %>%
+#  kable_styling(
+#    latex_options = c("hold_position", "scale_down"),
+#    font_size = 10
+#  )
+```
+
+The model is fitted via **Maximum Likelihood Estimation (MLE)**, maximizing the Poisson likelihood:
+
+$$
+\mathcal{L}(\boldsymbol{\beta}) = \prod_{i=1}^n \frac{\lambda_i^{y_i} e^{-\lambda_i}}{y_i!}
+$$
+
+
+```{r model-summary-table_2, results='asis', message=FALSE, warning=FALSE, echo=FALSE}
+library(knitr)
+library(kableExtra)
+
+fit_summary <- data.frame(
+  Model = c(paste("Model", 0:5), "ZIP Model"),
+  AIC = c(442.7, 323.3, 212.7, 162.2, 162.8, 259.6, 214.7),
+  LogLik = c(-216.3, -154.7, -99.3, -73.1, -74.4, -126.8, -99.3),
+  df = c(28, 26, 26, 25, 26, 30, NA)
+)
+
+kable(fit_summary, format = "latex", booktabs = TRUE,
+      caption = "Table: Summary of Model Fit Statistics") %>%
+  kable_styling(latex_options = c("hold_position", "striped")) %>%
+  column_spec(1, bold = TRUE)
+
+```
+### Model Assumptions
+
+Poisson regression relies on the following key assumptions (Dobson & Barnett, 2018; Agresti, 2007):
+
+- The response variable is a count (non-negative integers).
+- Observations are independent.
+- The log of the expected count is a linear function of the predictors.
+- The conditional mean equals the conditional variance (equidispersion).
+
+We test these assumptions using diagnostic plots and overdispersion analysis (see below).
+
 
 # Model Assessment
 
-```{r model-diagnostics2}
-data$pred <- predict(model1, type = "response")
-ggplot(data, aes(x = pred, y = apprentices)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  labs(title = "Predicted vs Actual Counts",
-       x = "Predicted", y = "Observed")
-```
+To compare models, we use:
 
-## Assumptions and Diagnostics
+#### 1. Akaike Information Criterion (AIC)
 
-```{r model-diagnostics3}
-par(mfrow = c(2, 2))
+$$
+\text{AIC} = 2k - 2 \log \hat{\mathcal{L}}
+$$
+
+where:
+- \( k \) is the number of parameters (degrees of freedom),
+- \( \hat{\mathcal{L}} \) is the maximized likelihood.
+
+Lower AIC values indicate better model performance while penalizing complexity.
+
+#### 2. Degrees of Freedom (df)
+
+$$
+\text{df} = n - k
+$$
+
+where:
+- \( n \) is the number of observations,
+- \( k \) is the number of estimated parameters.
+
+Table 3 provides a summary of the fitted models. Among all models tested, Model 3—which includes log-transformed distance, direction, urbanization, and their interactions—had the lowest AIC (162.18) and residual deviance, indicating the best overall fit. Simpler models, such as Model 0 (AIC = 442.7), performed significantly worse. Model 2, which includes a distance × direction interaction, showed improved fit (AIC = 212.7) but was still outperformed by the log-transformed models. The Zero-Inflated Poisson (ZIP) model achieved a similar fit to Model 2 (AIC = 214.7) but introduced additional complexity by modeling excess zeros.
+
+Although the dataset contains many zeros, a Vuong test comparing the standard Poisson model to a Zero-Inflated Poisson (ZIP) model found no significant improvement (z = 0.91, p = 0.18). AIC- and BIC-corrected statistics strongly favored the standard model. This suggests that the zeros are well explained by existing covariates, and modeling zero inflation adds unnecessary complexity.
+
+
+```{r model-diagnostics3,fig.cap="Diagnostic plots for Models M3 to M5", echo=FALSE,fig.width=10, fig.height=6}
+#par(mfrow = c(2, 2))
 # Plot for model0
-plot(model0, which = 1:4)
-mtext("Diagnostic Plots for Model 0", side = 3, line = -2, outer = TRUE)
-
+#plot(model0, which = 1:4)
+#mtext("Diagnostic Plots for Model 0", side = 3, line = -2, outer = TRUE)
 # Plot for model1
-plot(model1, which = 1:4)
-mtext("Diagnostic Plots for Model 1", side = 3, line = -2, outer = TRUE)
-
+#plot(model1, which = 1:4)
+#mtext("Diagnostic Plots for Model 1", side = 3, line = -2, outer = TRUE)
 # Plot for model2
-plot(model2, which = 1:4)
-mtext("Diagnostic Plots for Model 2", side = 3, line = -2, outer = TRUE)
+#plot(model2, which = 1:4)
+#mtext("Diagnostic Plots for Model 2", side = 3, line = -2, outer = TRUE)
+# Plot for model3
+#plot(model3, which = 1:4)
+#mtext("Diagnostic Plots for Model 3", side = 3, line = -2, outer = TRUE)
+# Plot for model4
+#plot(model4, which = 1:4)
+#mtext("Diagnostic Plots for Model 4", side = 3, line = -2, outer = TRUE)
+# Plot for model5
+#plot(model5, which = 1:4)
+#mtext("Diagnostic Plots for Model 5", side = 3, line = -2, outer = TRUE)
+
+# Manually plot diagnostics for zeroinfl model
+# resid_zip <- residuals(zip_model, type = "pearson")
+# fitted_zip <- fitted(zip_model)
+
+# Residuals vs Fitted
+#plot(fitted_zip, resid_zip,
+#     xlab = "Fitted values", ylab = "Pearson residuals",
+#     main = "ZIP Model: Residuals vs Fitted")
+#abline(h = 0, lty = 2)
+
+# Histogram of residuals
+#hist(resid_zip, breaks = 20,
+#     main = "Histogram of ZIP Model Residuals",
+#     xlab = "Pearson Residuals")
+
+models <- list(model0, model1, model2, model3, model4, model5)
+
+# Collect residuals and fitted values
+all_resid <- unlist(lapply(models, function(m) residuals(m, type = "pearson")))
+all_fitted <- unlist(lapply(models, fitted))
+all_stdresid <- unlist(lapply(models, function(m) rstandard(m)))
+all_sqrtresid <- sqrt(abs(all_resid))
+
+# Common axis limits
+ylim_resid <- range(all_resid)
+xlim_fitted <- range(all_fitted)
+ylim_sqrtresid <- range(all_sqrtresid)
+qq_ylim <- range(all_stdresid)
+qq_xlim <- c(0, 2.5)
+
+# Common Cook’s distance limits
+all_cooks <- unlist(lapply(models, cooks.distance))
+ylim_cooks <- range(all_cooks)
+
+plot_glm_diagnostics <- function(model, name) {
+  resid <- residuals(model, type = "pearson")
+  fitted_vals <- fitted(model)
+  std_resid <- rstandard(model)
+  cooks <- cooks.distance(model)
+
+  # 1. Residuals vs Fitted
+  plot(fitted_vals, resid,
+       main = paste(name, "- Res vs Fitted"),
+       xlab = "Fitted values", ylab = "Pearson Residuals",
+       ylim = ylim_resid, xlim = xlim_fitted, pch = 20)
+  abline(h = 0, lty = 2, col = "red")
+
+  # 2. Normal Q-Q
+  qqnorm(std_resid, main = paste(name, "- Q-Q Residuals"),
+         ylim = qq_ylim, pch = 20)
+  qqline(std_resid)
+
+  # 3. Scale-Location
+  plot(fitted_vals, sqrt(abs(resid)),
+       main = paste(name, "- Scale-Loc"),
+       xlab = "Fitted values", ylab = "√|Pearson Residuals|",
+       ylim = ylim_sqrtresid, xlim = xlim_fitted, pch = 20)
+  abline(h = 0, lty = 2, col = "red")
+
+  # 4. Cook's Distance with fixed ylim
+  plot(cooks, type = "h", main = paste(name, "- Cook's Dist"),
+       xlab = "Observation", ylab = "Cook's distance", ylim = ylim_cooks)
+  abline(h = 4/length(cooks), lty = 2, col = "red")
+}
+# First 3 models
+par(mfrow = c(3, 4), mar = c(3, 3, 2, 1), oma = c(5, 0, 2, 0))
+
+for (i in 2:4) {
+  plot_glm_diagnostics(models[[i]], paste0("M", i - 1))
+}
+
+
+# Add label under entire plot area
+#mtext("Figure 3: Diagnostic plots for Models M3 to M5", 
+#      side = 1, outer = TRUE, line = 3, cex = 1)
 
 ```
-### Diagnostic Evaluation of Poisson Models
 
-Diagnostic plots reveal substantial improvements in model fit across model versions. Model 0 and Model 1 exhibit severe residual issues, with observation 33 (likely Midlothian) emerging as an extreme outlier and highly influential point. The residuals vs fitted plots show strong deviation from expected patterns, and the Q-Q plots reveal heavy upper tails, indicating poor residual normality.
+The residual diagnostic plots for the best Models (AIC), which are model 1–3 (shown in Figure X) include:
 
-In contrast, Model 2 shows a significant improvement: residuals are more centered and homoscedastic, the influence of outliers is reduced, and Cook’s distance values are substantially lower. This suggests Model 2 handles outlier influence better and achieves more stable and interpretable parameter estimates.
+- Residuals vs Fitted: to assess non-linearity
 
-Overall, Model 2 is favored not only in terms of statistical fit (lower AIC and deviance) but also based on diagnostic validity.
+- Q-Q Plots: to assess normality of residuals (not assumed in Poisson but helps diagnose outliers)
 
+- Scale-Location: to examine homoscedasticity
 
+- Cook’s Distance: to identify influential observations
 
-The dispersion statistic is calculated to assess whether the variance significantly exceeds the mean, which would suggest overdispersion and the need for an alternative model.
+Model 1 shows wider spread in residuals, some curvature in the residual vs fitted plot, and a few high-leverage points (Cook’s distance).
+Model 2 improves upon this, with more linear residual patterns and lower influence points.
+Model 3 shows the best residual behavior—residuals are tightly clustered, with minimal deviation from linearity and no apparent outliers or influential observations.
 
-# Final Model
-
-```{r dispersion3}
-# Calculate dispersion for model0
+```{r model-diagnostics2, echo=FALSE}
+data$pred <- predict(model1, type = "response")
+#ggplot(data, aes(x = pred, y = apprentices)) +
+#  geom_point() +
+#  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+#  labs(title = "Predicted vs Actual Counts",
+#       x = "Predicted", y = "Observed")
+# Vuong test: Poisson vs ZIP
+# vuong(model2, zip_model)
+```
+```{r dispersion3, echo=FALSE}
+# Corrected dispersion calculation
 dispersion0 <- sum(residuals(model0, type = "pearson")^2) / model0$df.residual
-
-# Calculate dispersion for model1
 dispersion1 <- sum(residuals(model1, type = "pearson")^2) / model1$df.residual
-
-# Calculate dispersion for model2
 dispersion2 <- sum(residuals(model2, type = "pearson")^2) / model2$df.residual
+dispersion3 <- sum(residuals(model3, type = "pearson")^2) / model3$df.residual
+dispersion4 <- sum(residuals(model4, type = "pearson")^2) / model4$df.residual
+dispersion5 <- sum(residuals(model5, type = "pearson")^2) / model5$df.residual
+dispersionzip <- sum(residuals(zip_model, type = "pearson")^2) / zip_model$df.residual
 
-# Print results
-dispersion0
-dispersion1
-dispersion2
-
+# Print
+# dispersion0; dispersion1; dispersion2; dispersion3; dispersion4; dispersion5; dispersionzip
 
 ```
 ## Overdispersion Analysis
 
-To assess whether the Poisson regression models are appropriate, we calculated the dispersion statistic for each model using the Pearson residuals:
+A dispersion value close to 1 indicates that the Poisson assumption (mean ≈ variance) holds. Values substantially greater than 1 suggest **overdispersion**, meaning the model underestimates variability in the data.
 
-\[
-\text{Dispersion} = \frac{\sum \text{(Pearson residuals)}^2}{\text{Residual degrees of freedom}}
-\]
+The computed dispersion statistics are:
 
-The results are as follows:
+**Dispersion values** — Model 0: 7200.29, Model 1: 532.19, Model 2: 4.64, **Model 3: 1.85**, Model 4: 1.93, Model 5: 8.45, ZIP Model: 4.81
 
-- **Model 0:** 7200.29  
-- **Model 1:** 532.19  
-- **Model 2:** 4.64  
-
-A dispersion value significantly larger than 1 indicates **overdispersion**, meaning that the variance of the response variable is much greater than the mean—violating the assumption of the Poisson model. 
 
 ### Interpretation
 
-- **Model 0 and Model 1** show extreme overdispersion, suggesting that the model assumptions are strongly violated and that inference based on standard errors and p-values is unreliable.
-- **Model 2** performs significantly better, but the dispersion value of 4.64 still indicates **moderate overdispersion**, suggesting that the model still underestimates variability in the data.
+- **Model 0** and **Model 1** suffer from extreme overdispersion, confirming they are inadequate for modeling this data.
+- **Model 2** shows considerable improvement, but a dispersion of 4.64 still indicates a poor fit.
+- **Models 3 and 4** yield dispersion values close to 2, suggesting that these models manage variability relatively well and are more appropriate for inference.
+- **Model 5** shows renewed overdispersion (8.45), suggesting that its added complexity may not translate into improved fit.
+- The **ZIP model**, despite explicitly modeling excess zeros, still shows overdispersion (4.81) and, did not outperform the standard Poisson model.
 
-### Implications and Next Steps
+### Conclusion
 
-To correct for overdispersion, we recommend using:
-- A **quasi-Poisson** model, which retains the structure of the model but adjusts standard errors to be more robust.
-- Or preferably, a **Negative Binomial** model, which introduces an additional parameter to explicitly account for extra variability and typically results in more reliable inference.
+**Model 3** provides the best balance between goodness of fit and parsimony. It substantially reduces overdispersion while maintaining interpretability and a strong AIC performance. This reinforces the conclusion that the standard Poisson model, with appropriate transformations and interactions, is sufficient and preferable to more complex or zero-inflated alternatives. The dispearsion analyse confirms the choice of poisson regression and dicard the idea of using a different model like a quasi-poisson model or a negative binomial. 
 
-These adjustments ensure more accurate confidence intervals and hypothesis tests, without substantially changing the estimated coefficients.
+# Final Model
 
+## Final Model Specification
 
-
-
-
-
-```{r included variance}
-model2_quasi <- glm(apprentices ~ distance * direction + population, 
-                    data = data, family = quasipoisson(link = "log"))
-summary(model2_quasi)
-model2_nb <- glm.nb(apprentices ~ distance * direction + population, data = data)
-summary(model2_nb)
-
-```
-```{r included variance2}
-# AIC comparison
-AIC(model0, model1, model2, model2_nb)
-
-data$fit_nb <- predict(model2_nb, type = "response")
-ggplot(data, aes(x = fit_nb, y = apprentices)) +
-  geom_point() +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
-  labs(title = "Negative Binomial: Predicted vs Observed",
-       x = "Predicted", y = "Observed")
-
-resid_nb <- residuals(model2_nb, type = "pearson")
-plot(data$fit_nb, resid_nb,
-     xlab = "Fitted values", ylab = "Pearson Residuals",
-     main = "NB Residuals vs Fitted")
-abline(h = 0, lty = 2)
-
-
-
-```
-
-The estimated log-linear model is:
+The final Poisson regression model with a log-link function is given by:
 
 \[
-\hat{\log(\lambda)} = \text{intercept} + \beta_1 \cdot \text{Distance} + \beta_2 \cdot \text{Population} + \beta_3 \cdot \text{Urbanization} + \beta_4 \cdot \text{Direction (South/West)}
+\begin{aligned}
+\hat{y}_i = \exp\Big(& 
+81 
++ 0.28 \cdot \log(d_i) 
++ 34.76 \cdot \text{dir}_{\text{West},i} \\
+& + 198.90 \cdot \text{dir}_{\text{South},i} 
++ 2.46 \cdot \log(\text{pop}_i) 
++ 0.99 \cdot u_i \\
+& + 0.39 \cdot \log(d_i) \cdot \text{dir}_{\text{West},i} 
++ 0.29 \cdot \log(d_i) \cdot \text{dir}_{\text{South},i} 
+\Big)
+\end{aligned}
 \]
 
-Each coefficient represents the **log change** in the expected number of apprentices per unit increase in the predictor.
+Where:
+- log(dᵢ): log-transformed distance from Edinburgh
+- dirWestᵢ, dirSouthᵢ: dummy variables for direction (North is baseline)
+- log(popᵢ)`: log-transformed regional population
+- uᵢ: urbanization score
+- Interaction terms account for varying distance effects across directions
 
-# Conclusions
 
-- **Distance**: Negative and significant → counties farther from Edinburgh tend to send fewer apprentices.
-- **Population**: Positive → larger populations send more apprentices.
-- **Urbanization**: Positive and significant → more urbanized regions tend to send more apprentices.
-- **Direction**: Some directions show significant differences relative to the baseline.
+```{r coef-exp-model3, echo=TRUE, message=FALSE,echo=FALSE}
+# Exponentiate coefficients to get multiplicative effect
+#exp_coef <- exp(coef(model3))
+#round(exp_coef, 3)
+```
+```{r predict-distance, echo=TRUE, message=FALSE, echo=FALSE}
 
-The model identifies meaningful **associations** between regional characteristics and apprentice migration. No causality can be inferred. Dispersion is close to 1, suggesting the Poisson model is appropriate.
+# Create prediction dataset for distance and direction
+new_data <- expand.grid(
+  distance = seq(min(data$distance, na.rm = TRUE),
+                 max(data$distance, na.rm = TRUE),
+                 length.out = 100),
+  direction = unique(data$direction)
+)
 
-# References
+# Add required variables at mean values (or appropriate fixed value)
+new_data$urban <- mean(data$urban, na.rm = TRUE)
+new_data$population <- mean(data$population, na.rm = TRUE)  # <- ADD THIS LINE
 
-- Agresti, A. (2007). _An Introduction to Categorical Data Analysis_. Wiley.
-- Dobson, A. J., & Barnett, A. G. (2018). _An Introduction to Generalized Linear Models_. CRC Press.
+# Include log(distance) if used directly in model
+new_data$log_distance <- log(new_data$distance)
+
+# Predict expected counts
+new_data$predicted <- predict(model3, newdata = new_data, type = "response")
+
+# Plot predicted values
+#ggplot(new_data, aes(x = distance, y = predicted, color = direction)) +
+#  geom_line(size = 1.2) +
+#  labs(
+#    title = "Predicted Apprentice Counts by Distance and Direction",
+#    x = "Distance (miles)",
+#    y = "Predicted Apprentice Count"
+#  ) +
+#  theme_minimal()
+
+library(ggeffects)
+library(ggplot2)
+library(patchwork)
+
+# Safely compute marginal effects
+pop_eff <- ggpredict(model3, terms = "population")
+urb_eff <- ggpredict(model3, terms = "urban")
+
+# Plot side by side
+#plot(pop_eff) + labs(title = "Population Effect") +
+#plot(urb_eff) + labs(title = "Urban Effect")
+```
+
+
+
+
+```{r combined-effects, message=FALSE, warning=FALSE, fig.width=10, fig.height=6, fig.cap="Marginal effects of population, urbanization, and distance on apprentice counts", echo=FALSE}
+library(ggeffects)
+library(ggplot2)
+library(patchwork)
+
+# Get marginal effects
+pop_eff <- ggpredict(model3, terms = "population")
+urb_eff <- ggpredict(model3, terms = "urban")
+dist_eff <- ggpredict(model3, terms = c("distance", "direction"))
+
+# Define custom theme object (not a function!)
+custom_theme <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Centered and bold
+    axis.title = element_text(face = "bold")                # Bold axis labels
+  )
+
+# Create ggplots and apply theme
+p1 <- plot(pop_eff) + labs(title = "Population Effect") + custom_theme
+p2 <- plot(urb_eff) + labs(title = "Urban Effect") + custom_theme
+p3 <- plot(dist_eff) + labs(title = "Distance × Direction Effect") + custom_theme
+
+# Combine plots with patchwork
+(p1 | p2) / p3
+```
+
+
+- Population: As county population increases, the number of apprentices rises significantly, showing a strong positive effect.
+
+- Urbanization: More urbanized counties send slightly fewer apprentices, suggesting urban areas may offer local alternatives.
+
+- Distance × Direction: Apprentice counts drop sharply with increasing distance, especially in the South. At equal distances, southern counties send more apprentices than western or northern ones.
+
+This highlights population size as the main driver, with distance and geography shaping access
+
+# Conclusion
+This report explored the geographic and demographic factors influencing apprentice migration to Edinburgh between 1775 and 1799, using Poisson regression modeling. After evaluating several model specifications, Model 3, which includes log-transformed distance and population, urbanization, and interaction terms with direction, emerged as the best-fitting and most interpretable model.
+
+Key findings include:
+
+- Population size is the strongest positive driver of apprentice counts.
+
+- Urbanization shows a modest negative association, suggesting urban regions may offer local opportunities that reduce outward migration.
+
+- Distance significantly decreases apprentice counts, with the effect varying by region—southern counties send more apprentices than northern or western counties at comparable distances.
+
+Despite the presence of many zeros in the data, zero-inflated models did not provide a better fit, confirming that a well-specified standard Poisson model is sufficient. Diagnostic checks and dispersion analysis further support the robustness of the chosen model.
+
+Overall, this study highlights how spatial accessibility and local demographics jointly shaped labor mobility in historical Scotland. The final model offers both explanatory power and historical insight into the distribution of apprenticeship opportunities during this period. This analysis identifies statistical associations, not causal relationships, between regional characteristics and apprentice counts.
+
+
+## References
+- Lovett, A., & Flowerdew, R. (1989). Analysis of Count Data Using Poisson Regression. *The Professional Geographer*, 41(2), 190–198. https://doi.org/10.1111/j.0033-0124.1989.00190.x.
+
+
+- UCLA Institute for Digital Research and Education. (n.d.). [Poisson Regression in R](https://stats.oarc.ucla.edu/r/dae/poisson-regression/). 
+
+
+- Agresti, A. (2007). *An Introduction to Categorical Data Analysis*. Wiley.  
+- Dobson, A. J., & Barnett, A. G. (2018). *An Introduction to Generalized Linear Models*. CRC Press.  
+
+
+- Statistics Globe. (2022). [Poisson Regression in R (Generalized Linear Model) – YouTube Video](https://www.youtube.com/watch?v=FfBnX5dfxXw&t=334s).
+
+
+
+
+
