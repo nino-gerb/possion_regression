@@ -2,13 +2,13 @@
 
 This repository contains an applied statistical analysis investigating factors influencing the number of apprentices migrating from various Scottish counties to Edinburgh between 1775 and 1799.
 
-## 📄 Report Downloads
+## 📄 Report
 
 You can access the full report in the following formats:
 
-- 📘 [View report (HTML version)](./poisson_apprentice_report.html)
-- 📕 [Download report (PDF version)](./poisson_apprentice_report.pdf)
-
+- 📕 [View and Download report (PDF version)](./poisson_apprentice_report.pdf)
+- 📘 [Download report (HTML version)](./poisson_apprentice_report.html)
+- 
 The report includes:
 - Exploratory Data Analysis (EDA)
 - Poisson and Zero-Inflated Poisson modeling
